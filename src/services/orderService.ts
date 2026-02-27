@@ -4,7 +4,10 @@ import { logger } from '../utils/logger';
 
 export class OrderService {
   static async createOrder(data: Partial<IOrder>): Promise<IOrder> {
-    const totalAmount = data.items?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
+    // FIX: Using Math.round to avoid JS floating point math errors (e.g., 0.1 + 0.2 = 0.30000000000000004)
+    // All prices should be calculated in cents.
+    const rawTotal = data.items?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
+    const totalAmount = Math.round(rawTotal * 100) / 100;
     
     const order = new Order({
       ...data,
@@ -14,7 +17,6 @@ export class OrderService {
     
     const savedOrder = await order.save();
     
-    // Fire and forget event
     eventPublisher.publish('order.created', {
       orderId: savedOrder._id,
       customerId: savedOrder.customerId,
