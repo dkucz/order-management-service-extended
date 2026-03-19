@@ -5,7 +5,11 @@ const router = Router();
 
 router.get('/metrics', async (_req, res) => {
   res.set('Content-Type', register.contentType);
-  res.end(await register.metrics());
+  
+const metrics = await register.metrics();
+res.set("Content-Length", Buffer.byteLength(metrics));
+res.end(metrics);
+
 });
 
 export default router;
