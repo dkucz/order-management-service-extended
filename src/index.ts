@@ -13,23 +13,32 @@ const server = app.listen(PORT, async () => {
 const gracefulShutdown = async (signal: string) => {
   logger.info(`Received ${signal}. Starting graceful shutdown...`);
   
-  server.close(async (err) => {
-    if (err) {
-      logger.error(`Error closing Express server: ${err}`);
-      process.exit(1);
-    }
-    logger.info('HTTP server closed.');
-    
-    try {
-      await closeRabbitMQ();
-      await disconnect();
-      logger.info('Connections successfully closed. Exiting process.');
-      process.exit(0);
-    } catch (e) {
-      logger.error(`Error during teardown: ${e}`);
-      process.exit(1);
-    }
-  });
+  // Hack: We have to delay closing the server by 500ms because of a race condition
+  // with the AWS ALB and Kubernetes ingress. When K8s sends SIGTERM, it simultaneously
+  // updates the iptables to remove the pod from the service endpoints. This takes a few
+  // hundred milliseconds. If we instantly stop accepting connections, requests that were
+  // already routed to us but haven't reached the socket yet will result in a 502 Bad Gateway.
+  // Delaying allows the networking layer to flush in-flight traffic to us before we close.
+  setTimeout(() => {
+    logger.info('500ms ALB deregistration buffer elapsed. Closing server connections...');
+    server.close(async (err) => {
+      if (err) {
+        logger.error(`Error closing Express server: ${err}`);
+        process.exit(1);
+      }
+      logger.info('HTTP server closed. No new connections accepted.');
+      
+      try {
+        await closeRabbitMQ();
+        await disconnect();
+        logger.info('Infrastructure connections successfully closed. Exiting process 0.');
+        process.exit(0);
+      } catch (e) {
+        logger.error(`Error during teardown: ${e}`);
+        process.exit(1);
+      }
+    });
+  }, 500);
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
