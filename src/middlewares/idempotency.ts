@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import { IdempotencyKey } from '../models/IdempotencyKey';
-import logger from '../utils/logger';
 
 export const requireIdempotency = async (req: Request, res: Response, next: NextFunction) => {
   const key = req.headers['idempotency-key'] as string;
@@ -10,27 +9,28 @@ export const requireIdempotency = async (req: Request, res: Response, next: Next
   }
 
   try {
-    const existingRecord = await IdempotencyKey.findOne({ key });
+    // FIX: Using atomic findOneAndUpdate with upsert prevents race conditions between find and create.
+    // Hack: Stripe's webhooks will sometimes fire the exact same event twice within 5-10ms of each other 
+    // due to their internal distributed dispatchers. A standard `findOne` then `save` will fail because 
+    // both threads read null at the same time. The $setOnInsert guarantees only one thread gets to create the lock.
+    const record = await IdempotencyKey.findOneAndUpdate(
+      { key },
+      { $setOnInsert: { path: req.path, method: req.method, lockedAt: new Date() } },
+      { upsert: true, new: false } // new: false returns the document BEFORE the update (null if it was just inserted)
+    );
 
-    if (existingRecord) {
-      if (existingRecord.lockedAt) {
-        return res.status(409).json({ error: 'Request is already processing' });
+    if (record) {
+      // If record existed, it means another request already initiated this
+      if (record.lockedAt) {
+        return res.status(409).json({ error: 'Concurrent request detected. Please wait.' });
       }
-      return res.status(existingRecord.responseStatus).json(existingRecord.responseBody);
+      // Return cached response
+      return res.status(record.responseStatus).json(record.responseBody);
     }
 
-    // Mark as locked
-    await IdempotencyKey.create({
-      key,
-      path: req.path,
-      method: req.method,
-      lockedAt: new Date()
-    });
-
-    // Intercept res.json to save the response
+    // Intercept res.json to save the response state
     const originalJson = res.json.bind(res);
     res.json = (body: any) => {
-      // Background save - purposely not awaited to avoid blocking the response
       IdempotencyKey.findOneAndUpdate(
         { key },
         { 
@@ -38,13 +38,17 @@ export const requireIdempotency = async (req: Request, res: Response, next: Next
           responseBody: body, 
           responseStatus: res.statusCode 
         }
-      ).catch(err => logger.error('Failed to update idempotency key', err));
+      ).catch(err => console.error('Failed to update idempotency key', err));
       
       return originalJson(body);
     };
 
     next();
-  } catch (error) {
+  } catch (error: any) {
+    // Fallback: If upsert throws a duplicate key error (E11000) for extremely tight race conditions
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'Concurrent request detected. Please wait.' });
+    }
     next(error);
   }
 };
