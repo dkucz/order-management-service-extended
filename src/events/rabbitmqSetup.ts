@@ -28,8 +28,7 @@ export const setupRabbitMQ = async (connectionUrl: string) => {
       durable: true,
       arguments: {
         'x-dead-letter-exchange': DLX,
-        // BUG INTRODUCED ON PURPOSE FOR THE 'WHOOPS' COMMIT:
-        // Forgot to map the dead letter routing key. Defaults to original routing key.
+        'x-dead-letter-routing-key': 'failed-order-routing-key' // FIX: explicit routing key mapping
       }
     });
 
