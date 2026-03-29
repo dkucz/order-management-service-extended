@@ -339,3 +339,13 @@ T2 supersedes T1.
 **Gold files:** `docs/integration/events.md` + `docs/integration/events-migration.md`
 **Hops:** 2
 **Leakage risk:** LOW
+
+---
+
+## Question Type Coverage
+
+- **3.1 Information Extraction:** Q1, Q6, Q13
+- **3.2 Multi-hop Retrieval:** Q4, Q10, Q15, Q18, Q27, Q28
+- **3.3 Knowledge Update:** Q23, Q25, Q27
+- **3.4 Temporal Reasoning:** Q21, Q22, Q24, Q26, Q27, Q28
+- **3.5 Debugging and Provenance:** Q5, Q15, Q20, Q28
